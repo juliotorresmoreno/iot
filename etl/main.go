@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/juliotorresmoreno/iot/etl/config"
 	"github.com/juliotorresmoreno/iot/etl/handlers"
+	"github.com/juliotorresmoreno/iot/etl/tasks"
 )
 
 func setupRouter() *gin.Engine {
@@ -47,6 +48,8 @@ func main() {
 	default:
 		gin.SetMode(gin.DebugMode)
 	}
+
+	tasks.DefaultTaskManager.Subscribe()
 
 	r := setupRouter()
 	r.Run(conf.Addr)

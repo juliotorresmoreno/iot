@@ -2,10 +2,13 @@ package kafka
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/juliotorresmoreno/iot/etl/config"
+	"github.com/juliotorresmoreno/iot/etl/log"
 )
+
+var logger = log.Log
 
 type KafkaClient struct {
 	topic    string
@@ -13,23 +16,15 @@ type KafkaClient struct {
 	consumer *kafka.Consumer
 }
 
-func NewKafkaClient(topic string) *KafkaClient {
+func NewKafkaClient(topic string) (*KafkaClient, error) {
 	return &KafkaClient{
 		topic: topic,
-	}
+	}, nil
 }
 
 func (k *KafkaClient) MakeProducer() error {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return err
-	}
-
-	producer, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers": "host1:9092,host2:9092",
-		"client.id":         hostname,
-		"acks":              "all",
-	})
+	conf, _ := config.GetConfig()
+	producer, err := kafka.NewProducer(conf.Kaftka.Producer)
 
 	if err != nil {
 		return err
@@ -41,11 +36,8 @@ func (k *KafkaClient) MakeProducer() error {
 }
 
 func (k *KafkaClient) MakeConsumer() error {
-	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers": "host1:9092,host2:9092",
-		"group.id":          "foo",
-		"auto.offset.reset": "smallest",
-	})
+	conf, _ := config.GetConfig()
+	consumer, err := kafka.NewConsumer(conf.Kaftka.Consumer)
 	if err != nil {
 		return err
 	}
@@ -55,11 +47,27 @@ func (k *KafkaClient) MakeConsumer() error {
 	return nil
 }
 
-func (k KafkaClient) Pub(payload any) error {
-	return nil
+func (k *KafkaClient) Pub(payload any) error {
+	var err error
+	if k.producer == nil {
+		err = k.MakeProducer()
+	}
+	if err != nil {
+		return err
+	}
+
+	value := fmt.Sprintf("message-%d", 0)
+	err = k.producer.Produce(&kafka.Message{
+		TopicPartition: kafka.TopicPartition{
+			Topic:     &k.topic,
+			Partition: kafka.PartitionAny,
+		},
+		Value: []byte(value),
+	}, nil)
+	return err
 }
 
-func (k *KafkaClient) Sub(fn func(ch string, data any)) error {
+func (k *KafkaClient) Sub(fn func(ch string, data any) error) error {
 	var err error
 	if k.consumer == nil {
 		err = k.MakeConsumer()
@@ -68,21 +76,18 @@ func (k *KafkaClient) Sub(fn func(ch string, data any)) error {
 		return err
 	}
 
-	err = k.consumer.Subscribe(k.topic, nil)
+	logger.Info("Connecting to topic: " + k.topic)
+	err = k.consumer.SubscribeTopics([]string{k.topic}, func(c *kafka.Consumer, e kafka.Event) error {
+		fmt.Println(e)
+		return nil
+	})
 	if err != nil {
 		return err
 	}
 	c := k.consumer
 
 	for {
-		ev := c.Poll(100)
-		switch e := ev.(type) {
-		case *kafka.Message:
-			// application-specific processing
-		case kafka.Error:
-			fmt.Fprintf(os.Stderr, "%% Error: %v\n", e)
-		default:
-			fmt.Printf("Ignored %v\n", e)
-		}
+		ev := <-c.Events()
+		fmt.Println("event:", ev)
 	}
 }

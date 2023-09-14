@@ -8,6 +8,11 @@ type HttpBody struct {
 	Message string
 }
 
+type HttpBodyData struct {
+	Data  any
+	Total int
+}
+
 type HttpErr struct {
 	Status int
 	Body   HttpBody

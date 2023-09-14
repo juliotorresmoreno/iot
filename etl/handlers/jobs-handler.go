@@ -5,26 +5,31 @@ import (
 
 	"github.com/asaskevich/govalidator"
 	"github.com/gin-gonic/gin"
-	"github.com/juliotorresmoreno/iot/etl/db"
+	"github.com/juliotorresmoreno/iot/etl/data"
 	"github.com/juliotorresmoreno/iot/etl/entity"
-	"github.com/juliotorresmoreno/iot/etl/kafka"
+	"github.com/juliotorresmoreno/iot/etl/tasks"
 	log "github.com/sirupsen/logrus"
 )
 
-var manager = db.DefaultManager
-
-type JobsHandler struct{}
+type JobsHandler struct {
+	taskManager *tasks.TaskManager
+}
 
 func AttachJobsHandler(g *gin.RouterGroup) {
-	h := &JobsHandler{}
-	g.PUT("/import", h.Import)
+	h := &JobsHandler{
+		taskManager: tasks.DefaultTaskManager,
+	}
+	g.GET("", h.Find)
+	g.PUT("", h.Put)
+	g.DELETE("/:uuid", h.Delete)
 }
 
 type ImportBody struct {
-	Type string `json:"type" valid:"required,type(string),in(fake|real)"`
+	Type   string `json:"type"   valid:"required,type(string),in(import)"`
+	Source string `json:"source" valid:"required,type(string),in(fake|real)"`
 }
 
-func (h *JobsHandler) Import(c *gin.Context) {
+func (h *JobsHandler) Put(c *gin.Context) {
 	payload := &ImportBody{}
 	err := c.Bind(payload)
 	if err != nil {
@@ -40,27 +45,33 @@ func (h *JobsHandler) Import(c *gin.Context) {
 		return
 	}
 
-	kafkaCli := kafka.NewKafkaClient("jobs")
-	var source entity.Source
-	if payload.Type == "real" {
+	var source entity.Source = entity.Fake
+	if payload.Source == "real" {
 		source = entity.Real
-	} else if payload.Type == "fake" {
-		source = entity.Fake
 	}
-	dbCli, err := db.MakeManager(source)
+	etl, err := data.MakeETL(source)
 	if err != nil {
 		log.Error(err)
-		c.JSON(ErrInternalServerError.Status, ErrInternalServerError.Body)
+		c.JSON(ErrBadRequest.Status, HttpBody{Message: err.Error()})
 		return
 	}
-
-	kafkaCli.Pub(entity.Job{
-		Type: "add",
-		Name: "",
-		Data: map[string]string{"source": payload.Type},
-	})
-
-	log.Println(kafkaCli, dbCli)
+	h.taskManager.Add(etl.Run())
 
 	c.JSON(http.StatusOK, HttpBody{Message: "Task added"})
+}
+
+func (h *JobsHandler) Find(c *gin.Context) {
+	tasks := h.taskManager.List()
+
+	c.JSON(http.StatusOK, HttpBodyData{
+		Data:  tasks,
+		Total: len(tasks),
+	})
+}
+
+func (h *JobsHandler) Delete(c *gin.Context) {
+	uuid := c.Param("uuid")
+	h.taskManager.Del(uuid)
+
+	c.String(http.StatusNoContent, "")
 }
