@@ -1,12 +1,12 @@
 package redis
 
 import (
-	"encoding/base64"
 	"time"
 
 	"github.com/go-redis/redis"
 	"github.com/juliotorresmoreno/iot/etl/config"
 	"github.com/juliotorresmoreno/iot/etl/log"
+	"github.com/juliotorresmoreno/iot/etl/parser"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -14,6 +14,7 @@ var logger = log.Log
 
 type RedisClient struct {
 	client *redis.Client
+	parser *parser.Parser
 }
 
 var DefaultRedisClient *RedisClient
@@ -31,6 +32,8 @@ func NewRedisClient() (*RedisClient, error) {
 		return result, err
 	}
 
+	result.parser = parser.MakeParser()
+
 	redisConf, err := redis.ParseURL(conf.Redis.DSN)
 
 	if err != nil {
@@ -42,30 +45,8 @@ func NewRedisClient() (*RedisClient, error) {
 	return result, nil
 }
 
-func (el *RedisClient) encode(value map[string]interface{}) (string, error) {
-	buff, err := bson.Marshal(value)
-	if err != nil {
-		return "", err
-	}
-	b64 := base64.RawStdEncoding.EncodeToString(buff)
-
-	return b64, nil
-}
-
-func (el *RedisClient) decode(value string) (map[string]interface{}, error) {
-	result := map[string]interface{}{}
-	decoded, err := base64.RawStdEncoding.DecodeString(value)
-
-	if err != nil {
-		return result, err
-	}
-	err = bson.Unmarshal(decoded, result)
-
-	return result, err
-}
-
 func (el *RedisClient) Set(key string, value bson.M) error {
-	b64, err := el.encode(value)
+	b64, err := el.parser.Encode(value)
 	if err != nil {
 		return err
 	}
@@ -78,16 +59,17 @@ func (el *RedisClient) Set(key string, value bson.M) error {
 func (el *RedisClient) Get(key string) (bson.M, error) {
 	c := el.client.Get(key)
 	if c.Err() != nil {
-		return bson.M{}, c.Err()
+		return map[string]interface{}{}, c.Err()
 	}
 
-	value, err := el.decode(c.Val())
+	result := map[string]interface{}{}
+	err := el.parser.Decode(c.Val(), &result)
 
-	return value, err
+	return result, err
 }
 
 func (el *RedisClient) HSet(key, field string, value map[string]interface{}) (bool, error) {
-	b64, err := el.encode(value)
+	b64, err := el.parser.Encode(value)
 	if err != nil {
 		return false, err
 	}
@@ -100,13 +82,14 @@ func (el *RedisClient) HSet(key, field string, value map[string]interface{}) (bo
 func (el *RedisClient) HGet(key, field string) (map[string]interface{}, error) {
 	c := el.client.HGet(key, field)
 
-	value, err := el.decode(c.Val())
+	result := map[string]interface{}{}
+	err := el.parser.Decode(c.Val(), &result)
 
-	return value, err
+	return result, err
 }
 
-func (el *RedisClient) RPUSH(key string, value map[string]interface{}) (int64, error) {
-	b64, err := el.encode(value)
+func (el *RedisClient) RPush(key string, value map[string]interface{}) (int64, error) {
+	b64, err := el.parser.Encode(value)
 	if err != nil {
 		return 0, err
 	}
@@ -116,18 +99,20 @@ func (el *RedisClient) RPUSH(key string, value map[string]interface{}) (int64, e
 	return c.Result()
 }
 
-func (el *RedisClient) LRANGE(key string, start, stop int64) ([]map[string]interface{}, error) {
+func (el *RedisClient) LRange(key string, start, stop int64) ([]map[string]interface{}, error) {
 	c := el.client.LRange(key, start, stop)
 	result := make([]map[string]interface{}, 0)
 
 	items := c.Val()
 	for i := 0; i < len(items); i++ {
 		item := items[i]
-		value, err := el.decode(item)
 
+		value := map[string]interface{}{}
+		err := el.parser.Decode(item, &value)
 		if err != nil {
 			return result, err
 		}
+
 		result = append(result, value)
 	}
 
