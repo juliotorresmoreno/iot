@@ -2,20 +2,23 @@ package config
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"os"
 	"path"
 	"path/filepath"
 
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"gopkg.in/yaml.v2"
 )
 
 type KafkaConfig struct {
 	Producer *kafka.ConfigMap `yaml:"producer"`
 	Consumer *kafka.ConfigMap `yaml:"consumer"`
+}
+
+type RedisConfig struct {
+	DSN string `yaml:"dsn"`
 }
 
 type Config struct {
@@ -25,6 +28,7 @@ type Config struct {
 	Logger   bool              `yaml:"logger"`
 	Database map[string]string `yaml:"database"`
 	Kaftka   *KafkaConfig      `yaml:"kafka"`
+	Redis    *RedisConfig      `yaml:"redis"`
 }
 
 var config interface{}
@@ -62,7 +66,6 @@ func GetConfig() (Config, error) {
 	if err != nil {
 		return result, err
 	}
-	fmt.Println(string(buff))
 	err = yaml.Unmarshal(buff, &result)
 	if err != nil {
 		return result, err

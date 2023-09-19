@@ -7,9 +7,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/juliotorresmoreno/iot/etl/data"
 	"github.com/juliotorresmoreno/iot/etl/entity"
+	"github.com/juliotorresmoreno/iot/etl/log"
 	"github.com/juliotorresmoreno/iot/etl/tasks"
-	log "github.com/sirupsen/logrus"
 )
+
+var logger = log.Log
 
 type JobsHandler struct {
 	taskManager *tasks.TaskManager
@@ -33,14 +35,14 @@ func (h *JobsHandler) Put(c *gin.Context) {
 	payload := &ImportBody{}
 	err := c.Bind(payload)
 	if err != nil {
-		log.Error(err)
+		logger.Trace(err)
 		c.JSON(ErrBadRequest.Status, ErrBadRequest.Body)
 		return
 	}
 
 	_, err = govalidator.ValidateStruct(payload)
 	if err != nil {
-		log.Error(err)
+		logger.Trace(err)
 		c.JSON(ErrBadRequest.Status, HttpBody{Message: err.Error()})
 		return
 	}
@@ -51,11 +53,16 @@ func (h *JobsHandler) Put(c *gin.Context) {
 	}
 	etl, err := data.MakeETL(source)
 	if err != nil {
-		log.Error(err)
+		logger.Trace(err)
 		c.JSON(ErrBadRequest.Status, HttpBody{Message: err.Error()})
 		return
 	}
-	h.taskManager.Add(etl.Run())
+
+	if err = h.taskManager.Add(etl.Run()); err != nil {
+		logger.Trace(err)
+		c.JSON(ErrInternalServerError.Status, ErrInternalServerError.Body)
+		return
+	}
 
 	c.JSON(http.StatusOK, HttpBody{Message: "Task added"})
 }

@@ -44,13 +44,13 @@ func (t *TaskManager) Add(task Task) error {
 	}
 	t.tasks[task.UUID()] = task
 
-	t.kafkaCli.Pub(map[string]interface{}{
+	err := t.kafkaCli.Pub(map[string]interface{}{
 		"uuid":    task.UUID(),
 		"name":    task.Name(),
 		"channel": task.Channel(),
 	})
 
-	return nil
+	return err
 }
 
 func (t *TaskManager) Del(uuid string) error {

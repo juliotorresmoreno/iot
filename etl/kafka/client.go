@@ -1,9 +1,11 @@
 package kafka
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/juliotorresmoreno/iot/etl/config"
 	"github.com/juliotorresmoreno/iot/etl/log"
 )
@@ -56,13 +58,15 @@ func (k *KafkaClient) Pub(payload any) error {
 		return err
 	}
 
-	value := fmt.Sprintf("message-%d", 0)
+	buff := bytes.NewBufferString("")
+	json.NewEncoder(buff).Encode(payload)
+
 	err = k.producer.Produce(&kafka.Message{
 		TopicPartition: kafka.TopicPartition{
 			Topic:     &k.topic,
 			Partition: kafka.PartitionAny,
 		},
-		Value: []byte(value),
+		Value: buff.Bytes(),
 	}, nil)
 	return err
 }
@@ -77,17 +81,19 @@ func (k *KafkaClient) Sub(fn func(ch string, data any) error) error {
 	}
 
 	logger.Info("Connecting to topic: " + k.topic)
-	err = k.consumer.SubscribeTopics([]string{k.topic}, func(c *kafka.Consumer, e kafka.Event) error {
-		fmt.Println(e)
+	err = k.consumer.Subscribe(k.topic, func(c *kafka.Consumer, e kafka.Event) error {
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	c := k.consumer
 
 	for {
-		ev := <-c.Events()
-		fmt.Println("event:", ev)
+		msg, err := k.consumer.ReadMessage(100)
+		if err == nil {
+			fmt.Printf("Message on %s: %s\n", msg.TopicPartition, string(msg.Value))
+		} else if !err.(kafka.Error).IsTimeout() {
+			fmt.Printf("Consumer error: %v (%v)\n", err, msg)
+		}
 	}
 }
